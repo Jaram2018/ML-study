@@ -106,17 +106,12 @@ class Regression(nn.Module):
         self.num_layers = num_layers
 
         # set up modules for recurrent neural networks
-        self.rnn = nn.LSTM(input_size=self.max_length * self.embedding_dim,
-                           hidden_size = hidden_dim,
-                           num_layers=num_layers,
-                           batch_first=True,
-                           dropout=dropout,
-                           bidirectional=True)
-        self.hideen2tag = nn.Linear(hidden_dim, target_size)
+        self.rnn = nn.LSTM(embedding_dim* max_length, hidden_dim)
+        self.hidden2tag = nn.Linear(hidden_dim, target_size)
         self.hidden = self.init_hidden()
 
     def init_hidden(self):
-        return (Variable(torch.zeros(1,1, self.hidden_dim)).type(torch.LongTensor), Variable(torch.zeros(1,1, self.hidden_dim)).type(torch.LongTensor))
+        return (Variable(torch.zeros(1,1, self.hidden_dim)).type(torch.cuda.FloatTensor), Variable(torch.zeros(1,1, self.hidden_dim)).type(torch.cuda.FloatTensor))
 
     def forward(self, sentence: list):
         batch_size = len(sentence)
@@ -126,11 +121,11 @@ class Regression(nn.Module):
             data_in_torch = data_in_torch.cuda()
 
         embeds = self.embeddings(data_in_torch)
+
         lstm_out, self.hidden = self.rnn(
             embeds.view(batch_size, 1, -1), self.hidden)
         tag_space = self.hidden2tag(lstm_out.view(batch_size, -1))
-        tag_scores = F.log_softmax(tag_space, dim=1)
-        print(tag_scores)
+        tag_scores = F.softmax(tag_space, dim=1)
         return (tag_scores * 9) + 1
 
 
@@ -159,7 +154,7 @@ if __name__ == '__main__':
     # DONOTCHANGE: Reserved for nsml use
     bind_model(model, config)
 
-    criterion = nn.CrossEntropyLoss().cuda()
+    criterion = nn.NLLLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.01)
 
     # DONOTCHANGE: They are reserved for nsml
@@ -182,7 +177,8 @@ if __name__ == '__main__':
             avg_loss = 0.0
             for i, (data, labels) in enumerate(train_loader):
                 predictions = model(data)
-                label_vars = Variable(torch.from_numpy(labels))
+                label_vars = Variable(torch.from_numpy(labels)).type(torch.cuda.LongTensor)
+
                 if GPU_NUM:
                     label_vars = label_vars.cuda()
                 loss = criterion(predictions, label_vars)
