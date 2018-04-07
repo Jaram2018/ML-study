@@ -118,9 +118,14 @@ class Regression(nn.Module):
     def init_hidden(self):
         return (Variable(torch.zeros(1,1, self.hidden_dim)), Variable(torch.zeros(1,1, self.hidden_dim)))
 
-    def forward(self, sentence):
-        embeds = self.embeddings(sentence)
-        lstm_out, self.hidden = self.lstm(
+    def forward(self, sentence: list):
+        data_in_torch = Variable(torch.from_numpy(np.array(data)).long())
+
+        if GPU_NUM:
+            data_in_torch = data_in_torch.cuda()
+
+        embeds = self.embeddings(data_in_torch)
+        lstm_out, self.hidden = self.rnn(
             embeds.view(len(sentence), 1, -1), self.hidden)
         tag_space = self.hidden2tag(lstm_out.view(len(sentence), -1))
         tag_scores = F.log_softmax(tag_space, dim=1)
