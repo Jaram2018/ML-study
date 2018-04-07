@@ -154,7 +154,7 @@ if __name__ == '__main__':
     # DONOTCHANGE: Reserved for nsml use
     bind_model(model, config)
 
-    criterion = nn.NLLLoss()
+    criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=0.01)
 
     # DONOTCHANGE: They are reserved for nsml
@@ -166,19 +166,20 @@ if __name__ == '__main__':
     if config.mode == 'train':
         # 데이터를 로드합니다.
         dataset = MovieReviewDataset(DATASET_PATH, config.strmaxlen)
+        print(dataset.reviews.shape)
         train_loader = DataLoader(dataset=dataset,
                                   batch_size=config.batch,
                                   shuffle=True,
                                   collate_fn=collate_fn,
-                                  num_workers=2)
+                                  num_workers=8)
         total_batch = len(train_loader)
         # epoch마다 학습을 수행합니다.
         for epoch in range(config.epochs):
             avg_loss = 0.0
             for i, (data, labels) in enumerate(train_loader):
                 predictions = model(data)
-                label_vars = Variable(torch.from_numpy(labels)).type(torch.cuda.LongTensor)
 
+                label_vars = Variable(torch.from_numpy(labels))
                 if GPU_NUM:
                     label_vars = label_vars.cuda()
                 loss = criterion(predictions, label_vars)
@@ -186,7 +187,7 @@ if __name__ == '__main__':
                     loss = loss.cuda()
 
                 optimizer.zero_grad()
-                loss.backward()
+                loss.backward(retain_graph=True)
                 optimizer.step()
                 print('Batch : ', i + 1, '/', total_batch,
                       ', MSE in this minibatch: ', loss.data[0])
