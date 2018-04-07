@@ -106,7 +106,7 @@ class Regression(nn.Module):
         self.num_layers = num_layers
 
         # set up modules for recurrent neural networks
-        self.rnn = nn.LSTM(input_size=self.character_size * self.embedding_dim,
+        self.rnn = nn.LSTM(input_size=self.max_length * self.embedding_dim,
                            hidden_size = hidden_dim,
                            num_layers=num_layers,
                            batch_first=True,
@@ -116,18 +116,19 @@ class Regression(nn.Module):
         self.hidden = self.init_hidden()
 
     def init_hidden(self):
-        return (Variable(torch.zeros(1,1, self.hidden_dim)), Variable(torch.zeros(1,1, self.hidden_dim)))
+        return (Variable(torch.zeros(1,1, self.hidden_dim)).type(torch.LongTensor), Variable(torch.zeros(1,1, self.hidden_dim)).type(torch.LongTensor))
 
     def forward(self, sentence: list):
-        data_in_torch = Variable(torch.from_numpy(np.array(data)).long())
+        batch_size = len(sentence)
+        data_in_torch = Variable(torch.from_numpy(np.array(sentence)).long())
 
         if GPU_NUM:
             data_in_torch = data_in_torch.cuda()
 
         embeds = self.embeddings(data_in_torch)
         lstm_out, self.hidden = self.rnn(
-            embeds.view(len(sentence), 1, -1), self.hidden)
-        tag_space = self.hidden2tag(lstm_out.view(len(sentence), -1))
+            embeds.view(batch_size, 1, -1), self.hidden)
+        tag_space = self.hidden2tag(lstm_out.view(batch_size, -1))
         tag_scores = F.log_softmax(tag_space, dim=1)
         print(tag_scores)
         return (tag_scores * 9) + 1
@@ -158,7 +159,7 @@ if __name__ == '__main__':
     # DONOTCHANGE: Reserved for nsml use
     bind_model(model, config)
 
-    criterion = nn.MSELoss()
+    criterion = nn.CrossEntropyLoss().cuda()
     optimizer = optim.Adam(model.parameters(), lr=0.01)
 
     # DONOTCHANGE: They are reserved for nsml
