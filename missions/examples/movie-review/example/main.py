@@ -29,6 +29,7 @@ import torch
 from torch.autograd import Variable
 from torch import nn, optim
 from torch.utils.data import DataLoader
+import torch.nn.functional as F
 
 import nsml
 from dataset import MovieReviewDataset, preprocess
@@ -91,17 +92,9 @@ def collate_fn(data: list):
 
 
 class Regression(nn.Module):
-    """
-    영화리뷰 예측을 위한 Regression 모델입니다.
-    """
-    def __init__(self, embedding_dim: int, max_length: int):
-        """
-        initializer
-
-        :param embedding_dim: 데이터 임베딩의 크기입니다
-        :param max_length: 인풋 벡터의 최대 길이입니다 (첫 번째 레이어의 노드 수에 연관)
-        """
+    def __init__(self, embedding_dim: int, max_length: int, target_size, hidden_dim, num_layers=1, dropout=0.9):
         super(Regression, self).__init__()
+
         self.embedding_dim = embedding_dim
         self.character_size = 251
         self.output_dim = 1  # Regression
@@ -109,31 +102,30 @@ class Regression(nn.Module):
 
         # 임베딩
         self.embeddings = nn.Embedding(self.character_size, self.embedding_dim)
+        self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
 
-        # 첫 번째 레이어
-        self.fc1 = nn.Linear(self.max_length * self.embedding_dim, 200)
-        # 두 번째 (아웃풋) 레이어
-        self.fc2 = nn.Linear(200, 1)
+        # set up modules for recurrent neural networks
+        self.rnn = nn.LSTM(input_size=self.character_size * self.embedding_dim,
+                           hidden_size = hidden_dim,
+                           num_layers=num_layers,
+                           batch_first=True,
+                           dropout=dropout,
+                           bidirectional=True)
+        self.hideen2tag = nn.Linear(hidden_dim, target_size)
+        self.hidden = self.init_hidden()
 
-    def forward(self, data: list):
-        """
+    def init_hidden(self):
+        return (Variable(torch.zeros(1,1, self.hidden_dim)), Variable(torch.zeros(1,1, self.hidden_dim)))
 
-        :param data: 실제 입력값
-        :return:
-        """
-        # 임베딩의 차원 변환을 위해 배치 사이즈를 구합니다.
-        batch_size = len(data)
-        # list로 받은 데이터를 torch Variable로 변환합니다.
-        data_in_torch = Variable(torch.from_numpy(np.array(data)).long())
-        # 만약 gpu를 사용중이라면, 데이터를 gpu 메모리로 보냅니다.
-        if GPU_NUM:
-            data_in_torch = data_in_torch.cuda()
-        # 뉴럴네트워크를 지나 결과를 출력합니다.
-        embeds = self.embeddings(data_in_torch)
-        hidden = self.fc1(embeds.view(batch_size, -1))
-        # 영화 리뷰가 1~10점이기 때문에, 스케일을 맞춰줍니다
-        output = torch.sigmoid(self.fc2(hidden)) * 9 + 1
-        return output
+    def forward(self, sentence):
+        embeds = self.embeddings(sentence)
+        lstm_out, self.hidden = self.lstm(
+            embeds.view(len(sentence), 1, -1), self.hidden)
+        tag_space = self.hidden2tag(lstm_out.view(len(sentence), -1))
+        tag_scores = F.log_softmax(tag_space, dim=1)
+        print(tag_scores)
+        return (tag_scores * 9) + 1
 
 
 if __name__ == '__main__':
@@ -154,7 +146,7 @@ if __name__ == '__main__':
     if not HAS_DATASET and not IS_ON_NSML:  # It is not running on nsml
         DATASET_PATH = '../sample_data/movie_review/'
 
-    model = Regression(config.embedding, config.strmaxlen)
+    model = Regression(embedding_dim=config.embedding, max_length=config.strmaxlen, hidden_dim=128, target_size=1)
     if GPU_NUM:
         model = model.cuda()
 
