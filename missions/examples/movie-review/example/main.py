@@ -31,9 +31,7 @@ from torch import nn, optim
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 
-import nsml
 from dataset import MovieReviewDataset, preprocess
-from nsml import DATASET_PATH, HAS_DATASET, GPU_NUM, IS_ON_NSML
 
 
 # DONOTCHANGE: They are reserved for nsml
@@ -71,7 +69,7 @@ def bind_model(model, config):
 
     # DONOTCHANGE: They are reserved for nsml
     # nsml에서 지정한 함수에 접근할 수 있도록 하는 함수입니다.
-    nsml.bind(save=save, load=load, infer=infer)
+    # nsml.bind(save=save, load=load, infer=infer)
 
 
 def collate_fn(data: list):
@@ -106,24 +104,24 @@ class Regression(nn.Module):
         self.num_layers = num_layers
 
         # set up modules for recurrent neural networks
-        self.rnn = nn.LSTM(embedding_dim* max_length, hidden_dim)
-        self.hidden2tag = nn.Linear(hidden_dim, target_size)
+        self.rnn = nn.LSTM(embedding_dim* max_length, hidden_dim, dropout=dropout, bidirectional=True)
+        self.hidden2tag = nn.Linear(hidden_dim*2, target_size)
         self.hidden = self.init_hidden()
 
     def init_hidden(self):
-        return (Variable(torch.zeros(1,1, self.hidden_dim)).type(torch.cuda.FloatTensor), Variable(torch.zeros(1,1, self.hidden_dim)).type(torch.cuda.FloatTensor))
+        return (Variable(torch.zeros(2,1, self.hidden_dim)).type(torch.FloatTensor), Variable(torch.zeros(2,1, self.hidden_dim)).type(torch.FloatTensor))
 
     def forward(self, sentence: list):
         batch_size = len(sentence)
         data_in_torch = Variable(torch.from_numpy(np.array(sentence)).long())
 
-        if GPU_NUM:
-            data_in_torch = data_in_torch.cuda()
+        # if GPU_NUM:
+            # data_in_torch = data_in_torch.cuda()
 
         embeds = self.embeddings(data_in_torch)
-
         lstm_out, self.hidden = self.rnn(
             embeds.view(batch_size, 1, -1), self.hidden)
+        print(lstm_out.vi.ew(batch_size, -1))
         tag_space = self.hidden2tag(lstm_out.view(batch_size, -1))
         tag_scores = F.softmax(tag_space, dim=1)
         return (tag_scores * 9) + 1
@@ -144,29 +142,28 @@ if __name__ == '__main__':
     args.add_argument('--embedding', type=int, default=8)
     config = args.parse_args()
 
-    if not HAS_DATASET and not IS_ON_NSML:  # It is not running on nsml
-        DATASET_PATH = '../sample_data/movie_review/'
+    # if not HAS_DATASET and not IS_ON_NSML:  # It is not running on nsml
+    DATASET_PATH = '../sample_data/movie_review/'
 
     model = Regression(embedding_dim=config.embedding, max_length=config.strmaxlen, hidden_dim=128, target_size=1)
-    if GPU_NUM:
-        model = model.cuda()
+    # if GPU_NUM:
+    #     model = model.cuda()
 
     # DONOTCHANGE: Reserved for nsml use
     bind_model(model, config)
 
-    criterion = nn.MSELoss()
+    criterion = nn.MSELoss().cuda()
     optimizer = optim.Adam(model.parameters(), lr=0.01)
 
     # DONOTCHANGE: They are reserved for nsml
-    if config.pause:
-        nsml.paused(scope=locals())
+    # if config.pause:
+    #     nsml.paused(scope=locals())
 
 
     # 학습 모드일 때 사용합니다. (기본값)
     if config.mode == 'train':
         # 데이터를 로드합니다.
         dataset = MovieReviewDataset(DATASET_PATH, config.strmaxlen)
-        print(dataset.reviews.shape)
         train_loader = DataLoader(dataset=dataset,
                                   batch_size=config.batch,
                                   shuffle=True,
@@ -175,16 +172,18 @@ if __name__ == '__main__':
         total_batch = len(train_loader)
         # epoch마다 학습을 수행합니다.
         for epoch in range(config.epochs):
+            print("않이..")
             avg_loss = 0.0
             for i, (data, labels) in enumerate(train_loader):
+                print(np.array(data).reshape(2,-1))
                 predictions = model(data)
-
+                print(predictions)
                 label_vars = Variable(torch.from_numpy(labels))
-                if GPU_NUM:
-                    label_vars = label_vars.cuda()
+                # if GPU_NUM:
+                #     label_vars = label_vars.cuda()
                 loss = criterion(predictions, label_vars)
-                if GPU_NUM:
-                    loss = loss.cuda()
+                # if GPU_NUM:
+                #     loss = loss.cuda()
 
                 optimizer.zero_grad()
                 loss.backward(retain_graph=True)
@@ -195,10 +194,10 @@ if __name__ == '__main__':
             print('epoch:', epoch, ' train_loss:', float(avg_loss/total_batch))
             # nsml ps, 혹은 웹 상의 텐서보드에 나타나는 값을 리포트하는 함수입니다.
             #
-            nsml.report(summary=True, scope=locals(), epoch=epoch, epoch_total=config.epochs,
-                        train__loss=float(avg_loss/total_batch), step=epoch)
+            # nsml.report(summary=True, scope=locals(), epoch=epoch, epoch_total=config.epochs,
+            #             train__loss=float(avg_loss/total_batch), step=epoch)
             # DONOTCHANGE (You can decide how often you want to save the model)
-            nsml.save(epoch)
+            # nsml.save(epoch)
 
     # 로컬 테스트 모드일때 사용합니다
     # 결과가 아래와 같이 나온다면, nsml submit을 통해서 제출할 수 있습니다.
@@ -206,5 +205,5 @@ if __name__ == '__main__':
     elif config.mode == 'test_local':
         with open(os.path.join(DATASET_PATH, 'train/train_data'), 'rt', encoding='utf-8') as f:
             reviews = f.readlines()
-        res = nsml.infer(reviews)
-        print(res)
+        # res = nsml.infer(reviews)
+        # print(res)

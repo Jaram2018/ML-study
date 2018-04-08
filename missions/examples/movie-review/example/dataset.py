@@ -24,6 +24,8 @@ import os
 
 import numpy as np
 from torch.utils.data import Dataset
+import gensim
+from konlpy.tag import Kkma, Twitter
 
 from kor_char_parser import decompose_str_as_one_hot
 
@@ -39,16 +41,47 @@ class MovieReviewDataset(Dataset):
         :param dataset_path: 데이터셋 root path
         :param max_length: 문자열의 최대 길이
         """
+        self.tagger = Twitter()
+
+        self.dataset_path = dataset_path
         # 데이터, 레이블 각각의 경로
         data_review = os.path.join(dataset_path, 'train', 'train_data')
         data_label = os.path.join(dataset_path, 'train', 'train_label')
 
+        self.train()
+
+        self.new_model = gensim.models.Word2Vec.load('word2vec_model')
+
         # 영화리뷰 데이터를 읽고 preprocess까지 진행합니다
         with open(data_review, 'rt', encoding='utf-8') as f:
-            self.reviews = preprocess(f.readlines(), max_length)
+            self.reviews = preprocess(self,f.read().split("\n"), max_length)
         # 영화리뷰 레이블을 읽고 preprocess까지 진행합니다.
         with open(data_label) as f:
             self.labels = [np.float32(x) for x in f.readlines()]
+
+    def train(self):
+        data_review = os.path.join(self.dataset_path, 'train', 'train_data')
+        with open(data_review, 'rt', encoding='utf-8') as f:
+            corpus = f.read()
+        corpus = self.flat(content=corpus.split("\n"))
+
+        sentences_vocab = corpus
+        print(sentences_vocab)
+        sentences_train = corpus
+        self.gensim = gensim.models.Word2Vec()
+        self.gensim.build_vocab(sentences_vocab)
+        self.gensim.train(sentences_train, total_examples=len(corpus), epochs=300)
+        self.gensim.save('word2vec_model')
+        return self.gensim
+
+    def flat(self,content):
+        result = []
+        for c in content:
+            temp = []
+            for (word, tag) in self.tagger.pos(c):
+                temp.append("{}/{}".format(word, tag))
+            result.append(temp)
+        return result
 
     def __len__(self):
         """
@@ -66,7 +99,7 @@ class MovieReviewDataset(Dataset):
         return self.reviews[idx], self.labels[idx]
 
 
-def preprocess(data: list, max_length: int):
+def preprocess(self,data: list, max_length: int):
     """
      입력을 받아서 딥러닝 모델이 학습 가능한 포맷으로 변경하는 함수입니다.
      기본 제공 알고리즘은 char2vec이며, 기본 모델이 MLP이기 때문에, 입력 값의 크기를 모두 고정한 벡터를 리턴합니다.
@@ -76,7 +109,7 @@ def preprocess(data: list, max_length: int):
     :param max_length: 문자열의 최대 길이
     :return: 벡터 리스트 ([[0, 1, 5, 6], [5, 4, 10, 200], ...]) max_length가 4일 때
     """
-    vectorized_data = [decompose_str_as_one_hot(datum, warning=False) for datum in data]
+    vectorized_data = [[self.new_model.wv['{}/{}'.format(word, tag)] for (word, tag) in self.tagger.pos(dic)] for dic in data]
     zero_padding = np.zeros((len(data), max_length), dtype=np.int32)
     for idx, seq in enumerate(vectorized_data):
         length = len(seq)
